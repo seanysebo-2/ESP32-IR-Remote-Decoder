@@ -70,3 +70,11 @@ The PCB design has been prepared for manufacturing. The next stage involves asse
 
 #### PCB 3D Visualization
 ![ESP32 PCB 3D View](Screenshot%202026-10-08%20183120.png)
+
+### PCB Layout and 3D Visualization
+
+![PCB Layout](Screenshot%202026-10-08%20165951.png)
+
+![PCB Design](Screenshot%202026-10-08%20170400.png)
+
+![PCB 3D View](Screenshot%202026-10-08%20183120.png)
