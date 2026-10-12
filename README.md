@@ -58,3 +58,15 @@ The PCB design has been prepared for manufacturing. The next stage involves asse
 - Verify button functionality and infrared transmission
 - Improve the PCB layout based on physical testing
 - Explore a more compact handheld enclosure
+
+
+### PCB Design Images
+
+#### PCB Layout
+![ESP32 PCB Layout](Screenshot%202026-10-08%20165951.png)
+
+#### Additional PCB View
+![ESP32 PCB Design](Screenshot%202026-10-08%20170400.png)
+
+#### PCB 3D Visualization
+![ESP32 PCB 3D View](Screenshot%202026-10-08%20183120.png)
