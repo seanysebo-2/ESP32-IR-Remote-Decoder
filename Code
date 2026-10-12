@@ -1,23 +1,1102 @@
-
 #include <IRremote.hpp>
+#include <Preferences.h>
 
 #define IR_RECEIVE_PIN 15
+#define IR_SEND_PIN 5
+#define MAX_SAVED_SIGNALS 20
 
-void setup() {
-  Serial.begin(115200);
-  delay(1000);
+// Physical button mapping
+#define BUTTON_1_PIN 23   // Button 1 -> Slot 0
+#define BUTTON_2_PIN 22   // Button 2 -> Slot 1
+#define BUTTON_3_PIN 21   // Button 3 -> Slot 2
+#define BUTTON_4_PIN 19   // Button 4 -> Slot 3
 
-  IrReceiver.begin(IR_RECEIVE_PIN, DISABLE_LED_FEEDBACK);
 
-  Serial.println("Ready");
+// =====================================================
+// SAVED IR SIGNAL STRUCTURE
+// =====================================================
+
+struct SavedIRSignal {
+
+  decode_type_t protocol;
+
+  uint16_t address;
+
+  uint16_t command;
+
+  IRRawDataType rawData;
+
+};
+
+
+// =====================================================
+// RAM STORAGE
+// =====================================================
+//
+// These signals live in RAM while the ESP32 is running.
+// This makes accessing/transmitting them fast.
+//
+// Flash storage below makes a permanent copy so they
+// survive power loss.
+// =====================================================
+
+SavedIRSignal savedSignals[MAX_SAVED_SIGNALS];
+
+int savedSignalCount = 0;
+
+
+// =====================================================
+// PERMANENT FLASH STORAGE
+// =====================================================
+
+Preferences storage;
+
+
+// =====================================================
+// SAVE RAM CONTENTS TO FLASH
+// =====================================================
+
+void saveSignalsToFlash() {
+
+  // Save how many signals currently exist
+  storage.putUInt(
+    "count",
+    savedSignalCount
+  );
+
+
+  // Save the actual signal array
+  storage.putBytes(
+    "signals",
+    savedSignals,
+    savedSignalCount * sizeof(SavedIRSignal)
+  );
+
+
+  Serial.print(
+    "Saved "
+  );
+
+  Serial.print(
+    savedSignalCount
+  );
+
+  Serial.println(
+    " signal(s) to permanent flash."
+  );
 }
 
-void loop() {
-  if (IrReceiver.decode()) {
-    Serial.println("Signal received");
-    IrReceiver.printIRResultShort(&Serial);
+
+// =====================================================
+// LOAD FLASH CONTENTS INTO RAM
+// =====================================================
+
+void loadSignalsFromFlash() {
+
+  // Find out how many signals were previously saved
+  uint32_t storedCount =
+    storage.getUInt(
+      "count",
+      0
+    );
+
+
+  // Nothing saved yet
+  if (storedCount == 0) {
+
+    savedSignalCount = 0;
+
+    Serial.println(
+      "No saved signals found in flash."
+    );
+
+    return;
+  }
+
+
+  // Protect RAM array from invalid/corrupted data
+  if (storedCount > MAX_SAVED_SIGNALS) {
+
+    Serial.println(
+      "Invalid signal count found in flash."
+    );
+
+    savedSignalCount = 0;
+
+    return;
+  }
+
+
+  size_t expectedSize =
+    storedCount * sizeof(SavedIRSignal);
+
+
+  size_t storedSize =
+    storage.getBytesLength(
+      "signals"
+    );
+
+
+  // Make sure saved data matches the structure
+  if (storedSize != expectedSize) {
+
+    Serial.println(
+      "Stored IR data size does not match."
+    );
+
+    savedSignalCount = 0;
+
+    return;
+  }
+
+
+  // Copy flash data back into RAM
+  size_t bytesRead =
+    storage.getBytes(
+      "signals",
+      savedSignals,
+      expectedSize
+    );
+
+
+  if (bytesRead != expectedSize) {
+
+    Serial.println(
+      "Failed to load signals from flash."
+    );
+
+    savedSignalCount = 0;
+
+    return;
+  }
+
+
+  savedSignalCount = storedCount;
+
+
+  Serial.print(
+    "Loaded "
+  );
+
+  Serial.print(
+    savedSignalCount
+  );
+
+  Serial.println(
+    " signal(s) from flash into RAM."
+  );
+}
+
+
+// =====================================================
+// CLEAR ALL SAVED SIGNALS
+// =====================================================
+
+void clearAllSignals() {
+
+  // Clear RAM
+  savedSignalCount = 0;
+
+
+  // Clear permanent flash
+  storage.remove(
+    "count"
+  );
+
+  storage.remove(
+    "signals"
+  );
+
+
+  Serial.println(
+    "All saved IR signals cleared."
+  );
+}
+
+
+// =====================================================
+// CHECK WHETHER SIGNAL IS ALREADY SAVED
+// =====================================================
+
+bool signalAlreadySaved(
+
+  decode_type_t protocol,
+
+  uint16_t address,
+
+  uint16_t command,
+
+  IRRawDataType rawData
+
+) {
+
+  for (
+    int i = 0;
+    i < savedSignalCount;
+    i++
+  ) {
+
+    if (
+
+      savedSignals[i].protocol == protocol &&
+
+      savedSignals[i].address == address &&
+
+      savedSignals[i].command == command &&
+
+      savedSignals[i].rawData == rawData
+
+    ) {
+
+      return true;
+    }
+  }
+
+
+  return false;
+}
+
+
+// =====================================================
+// SAVE RECEIVED SIGNAL
+// =====================================================
+
+void saveSignal(
+
+  decode_type_t protocol,
+
+  uint16_t address,
+
+  uint16_t command,
+
+  IRRawDataType rawData
+
+) {
+
+  if (
+    savedSignalCount >= MAX_SAVED_SIGNALS
+  ) {
+
+    Serial.println(
+      "Storage is full."
+    );
+
+    return;
+  }
+
+
+  if (
+
+    signalAlreadySaved(
+
+      protocol,
+
+      address,
+
+      command,
+
+      rawData
+
+    )
+
+  ) {
+
+    Serial.println(
+      "This signal is already saved."
+    );
+
+    return;
+  }
+
+
+  // ---------------------------------------------------
+  // SAVE SIGNAL INTO RAM
+  // ---------------------------------------------------
+
+  savedSignals[
+    savedSignalCount
+  ].protocol = protocol;
+
+
+  savedSignals[
+    savedSignalCount
+  ].address = address;
+
+
+  savedSignals[
+    savedSignalCount
+  ].command = command;
+
+
+  savedSignals[
+    savedSignalCount
+  ].rawData = rawData;
+
+
+  Serial.print(
+    "Saved signal in RAM slot "
+  );
+
+  Serial.println(
+    savedSignalCount
+  );
+
+
+  savedSignalCount++;
+
+
+  // ---------------------------------------------------
+  // BACK UP RAM TO PERMANENT FLASH
+  // ---------------------------------------------------
+
+  saveSignalsToFlash();
+}
+
+
+// =====================================================
+// PRINT SAVED SIGNALS
+// =====================================================
+
+void printSavedSignals() {
+
+  Serial.println();
+
+  Serial.println(
+    "===== SAVED IR SIGNALS ====="
+  );
+
+
+  if (
+    savedSignalCount == 0
+  ) {
+
+    Serial.println(
+      "No signals saved."
+    );
+  }
+
+
+  for (
+    int i = 0;
+    i < savedSignalCount;
+    i++
+  ) {
+
+    Serial.print(
+      "Slot "
+    );
+
+    Serial.print(
+      i
+    );
+
+
+    Serial.print(
+      " | Protocol: "
+    );
+
+    Serial.print(
+      getProtocolString(
+        savedSignals[i].protocol
+      )
+    );
+
+
+    Serial.print(
+      " | Address: 0x"
+    );
+
+    Serial.print(
+      savedSignals[i].address,
+      HEX
+    );
+
+
+    Serial.print(
+      " | Command: 0x"
+    );
+
+    Serial.print(
+      savedSignals[i].command,
+      HEX
+    );
+
+
+    Serial.print(
+      " | Raw data: 0x"
+    );
+
+    Serial.println(
+      savedSignals[i].rawData,
+      HEX
+    );
+  }
+
+
+  Serial.println(
+    "============================"
+  );
+
+  Serial.println();
+}
+
+
+// =====================================================
+// TRANSMIT SAVED SIGNAL
+// =====================================================
+
+void transmitSignal(
+  int slot
+) {
+
+  if (
+    savedSignalCount == 0
+  ) {
+
+    Serial.println(
+      "No signals have been saved yet."
+    );
+
+    return;
+  }
+
+
+  if (
+    slot < 0 ||
+    slot >= savedSignalCount
+  ) {
+
+    Serial.print(
+      "Slot "
+    );
+
+    Serial.print(
+      slot
+    );
+
+    Serial.println(
+      " has not been saved yet."
+    );
+
+    return;
+  }
+
+
+  // Signal is pulled from RAM
+  SavedIRSignal signal =
+    savedSignals[slot];
+
+
+  Serial.print(
+    "Transmitting slot "
+  );
+
+  Serial.print(
+    slot
+  );
+
+  Serial.print(
+    ": "
+  );
+
+  Serial.println(
+    getProtocolString(
+      signal.protocol
+    )
+  );
+
+
+  // Temporarily stop IR receiving
+  IrReceiver.stop();
+
+
+  switch (
+    signal.protocol
+  ) {
+
+    case NEC:
+
+      IrSender.sendNEC(
+
+        signal.address,
+
+        signal.command,
+
+        0
+
+      );
+
+      break;
+
+
+    case SAMSUNG:
+
+      IrSender.sendSamsung(
+
+        signal.address,
+
+        signal.command,
+
+        0
+
+      );
+
+      break;
+
+
+    case SONY:
+
+      IrSender.sendSony(
+
+        signal.address,
+
+        signal.command,
+
+        0
+
+      );
+
+      break;
+
+
+    case RC5:
+
+      IrSender.sendRC5(
+
+        signal.address,
+
+        signal.command,
+
+        0
+
+      );
+
+      break;
+
+
+    case RC6:
+
+      IrSender.sendRC6(
+
+        signal.address,
+
+        signal.command,
+
+        0
+
+      );
+
+      break;
+
+
+    default:
+
+      Serial.println(
+
+        "That protocol is not supported "
+        "for transmission yet."
+
+      );
+
+
+      IrReceiver.start();
+
+      return;
+  }
+
+
+  delay(
+    100
+  );
+
+
+  // Start IR receiver again
+  IrReceiver.start();
+
+
+  Serial.println(
+    "Signal sent."
+  );
+}
+
+
+// =====================================================
+// CHECK PHYSICAL BUTTONS
+// =====================================================
+
+void checkButtons() {
+
+
+  // ---------------------------------------------------
+  // BUTTON 1
+  // D23 -> Saved Slot 0
+  // ---------------------------------------------------
+
+  if (
+    digitalRead(
+      BUTTON_1_PIN
+    ) == LOW
+  ) {
+
     Serial.println();
+
+    Serial.println(
+      "Button 1 pressed -> Slot 0"
+    );
+
+
+    transmitSignal(
+      0
+    );
+
+
+    // Wait for button release
+    while (
+
+      digitalRead(
+        BUTTON_1_PIN
+      ) == LOW
+
+    ) {
+
+      delay(
+        10
+      );
+    }
+
+
+    delay(
+      30
+    );
+  }
+
+
+  // ---------------------------------------------------
+  // BUTTON 2
+  // D22 -> Saved Slot 1
+  // ---------------------------------------------------
+
+  if (
+    digitalRead(
+      BUTTON_2_PIN
+    ) == LOW
+  ) {
+
+    Serial.println();
+
+    Serial.println(
+      "Button 2 pressed -> Slot 1"
+    );
+
+
+    transmitSignal(
+      1
+    );
+
+
+    while (
+
+      digitalRead(
+        BUTTON_2_PIN
+      ) == LOW
+
+    ) {
+
+      delay(
+        10
+      );
+    }
+
+
+    delay(
+      30
+    );
+  }
+
+
+  // ---------------------------------------------------
+  // BUTTON 3
+  // D21 -> Saved Slot 2
+  // ---------------------------------------------------
+
+  if (
+    digitalRead(
+      BUTTON_3_PIN
+    ) == LOW
+  ) {
+
+    Serial.println();
+
+    Serial.println(
+      "Button 3 pressed -> Slot 2"
+    );
+
+
+    transmitSignal(
+      2
+    );
+
+
+    while (
+
+      digitalRead(
+        BUTTON_3_PIN
+      ) == LOW
+
+    ) {
+
+      delay(
+        10
+      );
+    }
+
+
+    delay(
+      30
+    );
+  }
+
+
+  // ---------------------------------------------------
+  // BUTTON 4
+  // D19 -> Saved Slot 3
+  // ---------------------------------------------------
+
+  if (
+    digitalRead(
+      BUTTON_4_PIN
+    ) == LOW
+  ) {
+
+    Serial.println();
+
+    Serial.println(
+      "Button 4 pressed -> Slot 3"
+    );
+
+
+    transmitSignal(
+      3
+    );
+
+
+    while (
+
+      digitalRead(
+        BUTTON_4_PIN
+      ) == LOW
+
+    ) {
+
+      delay(
+        10
+      );
+    }
+
+
+    delay(
+      30
+    );
+  }
+}
+
+
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup() {
+
+  Serial.begin(
+    115200
+  );
+
+
+  delay(
+    2000
+  );
+
+
+  Serial.println();
+
+  Serial.println(
+    "================================"
+  );
+
+  Serial.println(
+    "ESP32 IR LEARNER AND TRANSMITTER"
+  );
+
+  Serial.println(
+    "RAM + PERMANENT FLASH STORAGE"
+  );
+
+  Serial.println(
+    "================================"
+  );
+
+
+  // ===================================================
+  // OPEN ESP32 FLASH STORAGE
+  // ===================================================
+
+  bool storageOpened =
+    storage.begin(
+      "irremote",
+      false
+    );
+
+
+  if (
+    storageOpened
+  ) {
+
+    Serial.println(
+      "Flash storage opened."
+    );
+
+
+    // Copy previously saved commands
+    // from flash into RAM
+    loadSignalsFromFlash();
+
+  }
+
+  else {
+
+    Serial.println(
+      "ERROR: Could not open flash storage."
+    );
+  }
+
+
+  // ===================================================
+  // BUTTON SETUP
+  // ===================================================
+
+  // Buttons use ESP32 internal pull-up resistors.
+  //
+  // Released = HIGH
+  // Pressed  = LOW
+
+  pinMode(
+    BUTTON_1_PIN,
+    INPUT_PULLUP
+  );
+
+
+  pinMode(
+    BUTTON_2_PIN,
+    INPUT_PULLUP
+  );
+
+
+  pinMode(
+    BUTTON_3_PIN,
+    INPUT_PULLUP
+  );
+
+
+  pinMode(
+    BUTTON_4_PIN,
+    INPUT_PULLUP
+  );
+
+
+  // ===================================================
+  // START IR RECEIVER
+  // ===================================================
+
+  IrReceiver.begin(
+
+    IR_RECEIVE_PIN,
+
+    DISABLE_LED_FEEDBACK
+
+  );
+
+
+  // ===================================================
+  // START IR TRANSMITTER
+  // ===================================================
+
+  IrSender.begin(
+
+    IR_SEND_PIN,
+
+    DISABLE_LED_FEEDBACK
+
+  );
+
+
+  Serial.println();
+
+  Serial.println(
+    "IR receiver ready."
+  );
+
+
+  Serial.println(
+    "Press remote buttons to save them."
+  );
+
+
+  Serial.println();
+
+  Serial.println(
+    "Physical button mapping:"
+  );
+
+
+  Serial.println(
+    "Button 1 (D23) -> Slot 0"
+  );
+
+
+  Serial.println(
+    "Button 2 (D22) -> Slot 1"
+  );
+
+
+  Serial.println(
+    "Button 3 (D21) -> Slot 2"
+  );
+
+
+  Serial.println(
+    "Button 4 (D19) -> Slot 3"
+  );
+
+
+  Serial.println();
+
+
+  Serial.println(
+    "You can also type a saved slot number "
+    "in Serial Monitor."
+  );
+
+
+  Serial.println();
+
+
+  // Display anything restored from flash
+  printSavedSignals();
+}
+
+
+// =====================================================
+// MAIN LOOP
+// =====================================================
+
+void loop() {
+
+
+  // ===================================================
+  // RECEIVE AND SAVE IR COMMANDS
+  // ===================================================
+
+  if (
+    IrReceiver.decode()
+  ) {
+
+    Serial.println();
+
+    Serial.println(
+      "IR SIGNAL DETECTED"
+    );
+
+
+    IrReceiver.printIRResultShort(
+      &Serial
+    );
+
+
+    decode_type_t receivedProtocol =
+
+      IrReceiver.decodedIRData.protocol;
+
+
+    uint16_t receivedAddress =
+
+      IrReceiver.decodedIRData.address;
+
+
+    uint16_t receivedCommand =
+
+      IrReceiver.decodedIRData.command;
+
+
+    IRRawDataType receivedRawData =
+
+      IrReceiver.decodedIRData.decodedRawData;
+
+
+    bool isRepeat =
+
+      IrReceiver.decodedIRData.flags &
+
+      IRDATA_FLAGS_IS_REPEAT;
+
+
+    if (
+      isRepeat
+    ) {
+
+      Serial.println(
+
+        "Repeat signal detected. Not saving."
+
+      );
+    }
+
+
+    else {
+
+      saveSignal(
+
+        receivedProtocol,
+
+        receivedAddress,
+
+        receivedCommand,
+
+        receivedRawData
+
+      );
+
+
+      printSavedSignals();
+    }
+
 
     IrReceiver.resume();
   }
+
+
+ // ===================================================
+// SERIAL MONITOR CONTROL
+// ===================================================
+
+if (Serial.available() > 0) {
+
+  String input = Serial.readStringUntil('\n');
+  input.trim();
+
+  if (input.equalsIgnoreCase("clear")) {
+
+    clearAllSignals();
+
+  } else {
+
+    int selectedSlot = input.toInt();
+
+    transmitSignal(selectedSlot);
+  }
+}
+  // ===================================================
+  // PHYSICAL BUTTON CONTROL
+  // ===================================================
+
+  checkButtons();
 }
