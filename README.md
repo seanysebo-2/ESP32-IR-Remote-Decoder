@@ -63,10 +63,9 @@ The PCB design has been prepared for manufacturing. The next stage involves asse
 
 ### Circuit Schematic
 
-The schematic shows the ESP32 GPIO connections, IR receiver and transmitter connections, and four tactile push buttons.
+The schematic shows the ESP32 GPIO connections, infrared receiver and transmitter connections, and four tactile push buttons.
 
-![ESP32 Circuit Schematic](Screenshot%202026-10-12%20172210.png)
-
+![ESP32 Circuit Schematic](Screenshot%202026-10-12%20182201.png)
 ### PCB Layout and Routing
 
 The PCB was designed in KiCad using front and back copper layers, component placement, copper trace routing, and ground planes.
